@@ -51,7 +51,7 @@ type WebView interface {
 	SetTitle(title string)
 
 	// SetSize updates native window size. See Hint constants.
-	SetSize(w int, h int, hint Hint)
+	SetSize(w int, h int)
 
 	// Navigate navigates webview to the given URL. URL may be a data URI, i.e.
 	// "data:text/text,<html>...</html>". It is often ok not to url-encode it
@@ -81,4 +81,14 @@ type WebView interface {
 	// f must be a function
 	// f must return either value and error or just error
 	Bind(name string, f interface{}) error
+
+	Hide()
+	Show()
+	Maximize()
+	Minimize()
+	Restore()
+	Center()
+	DisableMaximizeButton()
+	EnableMaximizeButton()
+	SetIconFromFile(iconPath string)
 }
