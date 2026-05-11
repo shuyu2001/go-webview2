@@ -12,8 +12,8 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/jchv/go-webview2/internal/w32"
-	"github.com/jchv/go-webview2/pkg/edge"
+	"github.com/shuyu2001/go-webview2/internal/w32"
+	"github.com/shuyu2001/go-webview2/pkg/edge"
 
 	"golang.org/x/sys/windows"
 )
@@ -147,8 +147,19 @@ func NewWithOptions(opts WebViewOptions) WebView {
 	}
 
 	if settings, err := opts.Chromium.GetSettings(); err == nil {
-		_ = settings.PutAreDefaultContextMenusEnabled(opts.Debug)
-		_ = settings.PutAreDevToolsEnabled(opts.Debug)
+		settings.PutAreDefaultContextMenusEnabled(opts.Debug)
+
+		settings.PutAreDevToolsEnabled(opts.Debug)
+
+		settings.PutIsPinchZoomEnabled(opts.Debug)
+
+		settings.PutIsStatusBarEnabled(opts.Debug)
+
+		settings.PutIsSwipeNavigationEnabled(opts.Debug)
+
+		settings.PutAreBrowserAcceleratorKeysEnabled(opts.Debug)
+
+		settings.PutIsZoomControlEnabled(opts.Debug)
 	}
 
 	return w

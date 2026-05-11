@@ -3,13 +3,13 @@ package main
 import (
 	"log"
 
-	"github.com/jchv/go-webview2"
-	"github.com/jchv/go-webview2/pkg/edge"
+	"github.com/shuyu2001/go-webview2"
+	"github.com/shuyu2001/go-webview2/pkg/edge"
 )
 
 func main() {
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
-		Debug:          true,
+		Debug:          false,
 		AutoFocus:      true,
 		Width:          600,
 		Height:         500,
