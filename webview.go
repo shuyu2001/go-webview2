@@ -6,6 +6,7 @@ package webview2
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"reflect"
 	"strconv"
@@ -71,21 +72,6 @@ func deleteWindowContext(wnd uintptr) {
 	delete(windowContext, wnd)
 }
 
-// ----------------------------------------------------------------------------
-// 接口定义
-// ----------------------------------------------------------------------------
-
-type browser interface {
-	Embed(hwnd uintptr) bool
-	Resize()
-	Navigate(url string)
-	NavigateToString(htmlContent string)
-	Init(script string)
-	Eval(script string)
-	NotifyParentWindowPositionChanged() error
-	Focus()
-}
-
 // WebViewOptions 提供现代化窗口和 Webview 配置
 type WebViewOptions struct {
 	Title        string
@@ -122,6 +108,7 @@ type webview struct {
 	mainthread uintptr
 	routes     map[string]route
 	host       string
+	route      bool
 	browser    *edge.Chromium
 	autofocus  bool
 	maxsz      w32.Point
@@ -146,6 +133,7 @@ func NewWithOptions(opts WebViewOptions) WebView {
 		bindings:  make(map[string]interface{}),
 		routes:    make(map[string]route),
 		host:      opts.Host,
+		route:     !opts.DisableRoute,
 		autofocus: opts.AutoFocus,
 	}
 
@@ -179,24 +167,8 @@ func NewWithOptions(opts WebViewOptions) WebView {
 		settings.PutIsZoomControlEnabled(opts.Debug)
 	}
 
-	if !opts.DisableRoute {
+	if w.route {
 		w.browser.AddWebResourceRequestedFilter(w.host+"*", edge.COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW)
-
-		var env = w.browser.Environment()
-
-		w.browser.WebResourceRequestedCallback = func(request *edge.ICoreWebView2WebResourceRequest, args *edge.ICoreWebView2WebResourceRequestedEventArgs) {
-			var uri, err = request.GetUri()
-			if err != nil {
-				return
-			}
-			if route, found := w.routes[uri]; found {
-				var res, err = env.CreateWebResourceResponse([]byte(route.content), 200, "OK", route.headers)
-				if err != nil {
-					return
-				}
-				args.PutResponse(res)
-			}
-		}
 	}
 
 	return w
@@ -389,7 +361,7 @@ func (w *webview) EnableMaximizeButton() {
 	)
 }
 
-func (w *webview) SetIconFromFile(id uintptr) {
+func (w *webview) SetIcon(id uintptr) {
 	w32.GetModuleHandleW.Call()
 
 	hInstance, _, _ := w32.GetModuleHandleW.Call(0)
@@ -613,6 +585,23 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 // ----------------------------------------------------------------------------
 
 func (w *webview) Run() {
+	if w.route {
+		var env = w.browser.Environment()
+		w.browser.WebResourceRequestedCallback = func(request *edge.ICoreWebView2WebResourceRequest, args *edge.ICoreWebView2WebResourceRequestedEventArgs) {
+			var uri, err = request.GetUri()
+			fmt.Println("uri = ", uri)
+			if err != nil {
+				return
+			}
+			if route, found := w.routes[uri]; found {
+				var res, err = env.CreateWebResourceResponse([]byte(route.content), 200, "OK", route.headers)
+				if err != nil {
+					return
+				}
+				args.PutResponse(res)
+			}
+		}
+	}
 	var msg w32.Msg
 	for {
 		ret, _, _ := w32.User32GetMessageW.Call(
