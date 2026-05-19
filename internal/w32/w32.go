@@ -12,7 +12,9 @@ var (
 	ole32               = windows.NewLazySystemDLL("ole32")
 	Ole32CoInitializeEx = ole32.NewProc("CoInitializeEx")
 
-	kernel32                   = windows.NewLazySystemDLL("kernel32")
+	kernel32 = windows.NewLazySystemDLL("kernel32")
+
+	GetModuleHandleW           = kernel32.NewProc("GetModuleHandleW")
 	Kernel32GetCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
 
 	shlwapi                  = windows.NewLazySystemDLL("shlwapi")

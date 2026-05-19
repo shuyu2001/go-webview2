@@ -90,5 +90,9 @@ type WebView interface {
 	Center()
 	DisableMaximizeButton()
 	EnableMaximizeButton()
-	SetIconFromFile(iconPath string)
+	SetIconFromFile(id uintptr)
+
+	AddRoute(path string, content string, headers string)
+
+	AddHtmlContentRoute(path string, content string)
 }

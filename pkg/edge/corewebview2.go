@@ -6,6 +6,7 @@ package edge
 import (
 	"log"
 	"runtime"
+	"syscall"
 	"unsafe"
 
 	"github.com/shuyu2001/go-webview2/internal/w32"
@@ -165,42 +166,48 @@ type ICoreWebView2Environment struct {
 	vtbl *iCoreWebView2EnvironmentVtbl
 }
 
-func (e *ICoreWebView2Environment) CreateWebResourceResponse(content []byte, statusCode int, reasonPhrase string, headers string) (*ICoreWebView2WebResourceResponse, error) {
-	var err error
+func (e *ICoreWebView2Environment) CreateWebResourceResponse(
+	content []byte,
+	statusCode int,
+	reasonPhrase string,
+	headers string,
+) (*ICoreWebView2WebResourceResponse, error) {
+
 	var stream uintptr
+	var err error
 
 	if len(content) > 0 {
-		// Create stream for response
 		stream, err = w32.SHCreateMemStream(content)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	// Convert string 'uri' to *uint16
-	_reason, err := windows.UTF16PtrFromString(reasonPhrase)
+	reasonPtr, err := windows.UTF16PtrFromString(reasonPhrase)
 	if err != nil {
 		return nil, err
 	}
-	// Convert string 'uri' to *uint16
-	_headers, err := windows.UTF16PtrFromString(headers)
+	headersPtr, err := windows.UTF16PtrFromString(headers)
 	if err != nil {
 		return nil, err
 	}
+
 	var response *ICoreWebView2WebResourceResponse
-	_, _, err = e.vtbl.CreateWebResourceResponse.Call(
+
+	hr, _, _ := e.vtbl.CreateWebResourceResponse.Call(
 		uintptr(unsafe.Pointer(e)),
 		stream,
 		uintptr(statusCode),
-		uintptr(unsafe.Pointer(_reason)),
-		uintptr(unsafe.Pointer(_headers)),
+		uintptr(unsafe.Pointer(reasonPtr)),
+		uintptr(unsafe.Pointer(headersPtr)),
 		uintptr(unsafe.Pointer(&response)),
 	)
-	if err != windows.ERROR_SUCCESS {
-		return nil, err
-	}
-	return response, nil
 
+	if int32(hr) < 0 {
+		return nil, syscall.Errno(hr)
+	}
+
+	return response, nil
 }
 
 // ICoreWebView2WebMessageReceivedEventArgs

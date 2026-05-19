@@ -88,9 +88,11 @@ type browser interface {
 
 // WebViewOptions 提供现代化窗口和 Webview 配置
 type WebViewOptions struct {
-	Title  string
-	Width  int
-	Height int
+	Title        string
+	Width        int
+	Height       int
+	Host         string
+	DisableRoute bool
 
 	Center          bool // 是否居中屏幕
 	StartMaximized  bool // 启动时是否最大化
@@ -109,10 +111,18 @@ type WebViewOptions struct {
 // webview 核心结构
 // ----------------------------------------------------------------------------
 
+type route struct {
+	content string
+	headers string
+	path    string
+}
+
 type webview struct {
 	hwnd       uintptr
 	mainthread uintptr
-	browser    browser
+	routes     map[string]route
+	host       string
+	browser    *edge.Chromium
 	autofocus  bool
 	maxsz      w32.Point
 	minsz      w32.Point
@@ -128,8 +138,14 @@ func NewWithOptions(opts WebViewOptions) WebView {
 		return nil
 	}
 
+	if opts.Host == "" {
+		opts.Host = "http://shuyuz.app/"
+	}
+
 	w := &webview{
 		bindings:  make(map[string]interface{}),
+		routes:    make(map[string]route),
+		host:      opts.Host,
 		autofocus: opts.AutoFocus,
 	}
 
@@ -138,6 +154,7 @@ func NewWithOptions(opts WebViewOptions) WebView {
 		edge.CoreWebView2PermissionKindClipboardRead,
 		edge.CoreWebView2PermissionStateAllow,
 	)
+
 	w.browser = opts.Chromium
 
 	w.mainthread, _, _ = w32.Kernel32GetCurrentThreadID.Call()
@@ -160,6 +177,26 @@ func NewWithOptions(opts WebViewOptions) WebView {
 		settings.PutAreBrowserAcceleratorKeysEnabled(opts.Debug)
 
 		settings.PutIsZoomControlEnabled(opts.Debug)
+	}
+
+	if !opts.DisableRoute {
+		w.browser.AddWebResourceRequestedFilter(w.host+"*", edge.COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW)
+
+		var env = w.browser.Environment()
+
+		w.browser.WebResourceRequestedCallback = func(request *edge.ICoreWebView2WebResourceRequest, args *edge.ICoreWebView2WebResourceRequestedEventArgs) {
+			var uri, err = request.GetUri()
+			if err != nil {
+				return
+			}
+			if route, found := w.routes[uri]; found {
+				var res, err = env.CreateWebResourceResponse([]byte(route.content), 200, "OK", route.headers)
+				if err != nil {
+					return
+				}
+				args.PutResponse(res)
+			}
+		}
 	}
 
 	return w
@@ -352,33 +389,30 @@ func (w *webview) EnableMaximizeButton() {
 	)
 }
 
-func (w *webview) SetIconFromFile(iconPath string) {
-	ptr, err := windows.UTF16PtrFromString(iconPath)
-	if err != nil {
-		log.Printf("SetIconFromFile: invalid path: %v", err)
-		return
-	}
+func (w *webview) SetIconFromFile(id uintptr) {
+	w32.GetModuleHandleW.Call()
 
-	smallIcon, _, _ := w32.User32LoadImageW.Call(
-		0, uintptr(unsafe.Pointer(ptr)),
-		imageIcon, 16, 16, lrLoadFromFile,
-	)
-	largeIcon, _, _ := w32.User32LoadImageW.Call(
-		0, uintptr(unsafe.Pointer(ptr)),
-		imageIcon, 32, 32, lrLoadFromFile,
+	hInstance, _, _ := w32.GetModuleHandleW.Call(0)
+
+	hIcon, _, _ := w32.User32LoadImageW.Call(
+		hInstance,
+		id, // 资源ID
+		1,
+		0,
+		0,
+		0x40,
 	)
 
-	if smallIcon == 0 && largeIcon == 0 {
-		log.Printf("SetIconFromFile: failed to load icon from %q", iconPath)
-		return
-	}
+	w32.User32SendMessageW.Call(w.hwnd, 0x0080, 0, hIcon)
+	w32.User32SendMessageW.Call(w.hwnd, 0x0080, 1, hIcon)
+}
 
-	if smallIcon != 0 {
-		w32.User32SendMessageW.Call(w.hwnd, wmSetIcon, iconSmall, smallIcon)
-	}
-	if largeIcon != 0 {
-		w32.User32SendMessageW.Call(w.hwnd, wmSetIcon, iconBig, largeIcon)
-	}
+func (w *webview) AddRoute(path string, content string, headers string) {
+	w.routes[path] = route{path: path, content: content, headers: headers}
+}
+
+func (w *webview) AddHtmlContentRoute(path string, content string) {
+	w.AddRoute(path, content, "Content-Type: text/html; charset=utf-8")
 }
 
 func (w *webview) SetSize(width, height int) {
