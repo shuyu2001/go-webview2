@@ -4,6 +4,7 @@
 package edge
 
 import (
+	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
@@ -39,6 +40,7 @@ type Chromium struct {
 
 	// Callbacks
 	MessageCallback              func(string)
+	JSONMessageCallback          func(any)
 	WebResourceRequestedCallback func(request *ICoreWebView2WebResourceRequest, args *ICoreWebView2WebResourceRequestedEventArgs)
 	NavigationCompletedCallback  func(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs)
 	AcceleratorKeyCallback       func(uint) bool
@@ -125,6 +127,46 @@ func (e *Chromium) NavigateToString(htmlContent string) {
 		uintptr(unsafe.Pointer(e.webview)),
 		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(htmlContent))),
 	)
+}
+
+func (e *Chromium) PostWebMessageAsJson(jsonStr string) error {
+	_, _, err := e.webview.vtbl.PostWebMessageAsJSON.Call(
+		uintptr(unsafe.Pointer(e.webview)),
+		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(jsonStr))),
+	)
+	return err
+}
+
+func (e *Chromium) PostWebMessageAsString(jsonStr string) error {
+	_, _, err := e.webview.vtbl.PostWebMessageAsString.Call(
+		uintptr(unsafe.Pointer(e.webview)),
+		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(jsonStr))),
+	)
+	return err
+}
+
+func (e *Chromium) GetURL() (string, error) {
+	var uriPtr uintptr
+
+	hr, _, _ := e.webview.vtbl.GetSource.Call(
+		uintptr(unsafe.Pointer(e.webview)),
+		uintptr(unsafe.Pointer(&uriPtr)),
+	)
+
+	if int32(hr) < 0 {
+		return "", windows.Errno(hr)
+	}
+
+	if uriPtr == 0 {
+		return "", nil
+	}
+
+	sourceStr := windows.UTF16PtrToString((*uint16)(unsafe.Pointer(uriPtr)))
+
+	// 5. 【关键优化】复制完成后，再释放 Windows COM 分配的内存
+	windows.CoTaskMemFree(unsafe.Pointer(uriPtr))
+
+	return sourceStr, nil
 }
 
 func (e *Chromium) Init(script string) {
@@ -230,20 +272,53 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 	return 0
 }
 
-func (e *Chromium) MessageReceived(sender *ICoreWebView2, args *iCoreWebView2WebMessageReceivedEventArgs) uintptr {
-	var message *uint16
-	_, _, _ = args.vtbl.TryGetWebMessageAsString.Call(
-		uintptr(unsafe.Pointer(args)),
-		uintptr(unsafe.Pointer(&message)),
-	)
-	if e.MessageCallback != nil {
-		e.MessageCallback(w32.Utf16PtrToString(message))
+func WrapJSONCallback[T any](fn func(T)) func(any) {
+	return func(data any) {
+		// 先转回 JSON 字符串
+		b, err := json.Marshal(data)
+		if err != nil {
+			return
+		}
+		// 再反序列化为目标类型
+		var result T
+		if err := json.Unmarshal(b, &result); err != nil {
+			return
+		}
+		fn(result)
 	}
-	_, _, _ = sender.vtbl.PostWebMessageAsString.Call(
-		uintptr(unsafe.Pointer(sender)),
-		uintptr(unsafe.Pointer(message)),
-	)
-	windows.CoTaskMemFree(unsafe.Pointer(message))
+}
+
+func (e *Chromium) MessageReceived(sender *ICoreWebView2, args *iCoreWebView2WebMessageReceivedEventArgs) uintptr {
+	if e.MessageCallback != nil {
+		var message *uint16
+		_, _, _ = args.vtbl.TryGetWebMessageAsString.Call(
+			uintptr(unsafe.Pointer(args)),
+			uintptr(unsafe.Pointer(&message)),
+		)
+		if message != nil {
+			e.MessageCallback(w32.Utf16PtrToString(message))
+			windows.CoTaskMemFree(unsafe.Pointer(message))
+		}
+	}
+
+	if e.JSONMessageCallback != nil {
+		var jsonMessage *uint16
+		_, _, _ = args.vtbl.GetWebMessageAsJSON.Call(
+			uintptr(unsafe.Pointer(args)),
+			uintptr(unsafe.Pointer(&jsonMessage)),
+		)
+		if jsonMessage != nil {
+			jsonStr := w32.Utf16PtrToString(jsonMessage)
+			windows.CoTaskMemFree(unsafe.Pointer(jsonMessage))
+
+			var goObject any
+			if err := json.Unmarshal([]byte(jsonStr), &goObject); err != nil {
+				goObject = jsonStr
+			}
+			e.JSONMessageCallback(goObject)
+		}
+	}
+
 	return 0
 }
 

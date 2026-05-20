@@ -95,4 +95,12 @@ type WebView interface {
 	AddRoute(path string, content string, headers string)
 
 	AddHtmlContentRoute(path string, content string)
+
+	PostWebMessageAsJSON(data interface{}) error
+
+	PostWebMessageAsString(str string) error
+
+	GetURL() string
+
+	Emit(eventName string, data interface{})
 }

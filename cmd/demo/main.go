@@ -1,15 +1,27 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"time"
+
+	_ "embed"
 
 	"github.com/shuyu2001/go-webview2"
 	"github.com/shuyu2001/go-webview2/pkg/edge"
 )
 
+//go:embed test.html
+var html string
+
+type Action struct {
+	Action string `json:"action"`
+	URL    string `json:"url"`
+}
+
 func main() {
-	var host = "https://shuyuz.app/"
+	var host = "http://app.localhost/"
+	var chrome = edge.NewChromium()
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:          true,
 		AutoFocus:      true,
@@ -19,27 +31,32 @@ func main() {
 		Center:         true,
 		DisableResize:  true,
 		StartMaximized: false,
-		Chromium:       edge.NewChromium(),
+		Chromium:       chrome,
 	})
 	if w == nil {
 		log.Fatalln("Failed to load webview.")
 	}
 	defer w.Destroy()
-	w.AddHtmlContentRoute(host+"/index1", "<h1>Index1</h1>")
-	w.AddHtmlContentRoute(host+"/index2", "<h1>Index2</h1>")
 
-	// 1. 先在主线程（或直接初始化时）跳转到第一个页面
-	w.Navigate(host + "/index1")
-
-	// 2. 启动一个后台 Goroutine 来处理定时任务，避免阻塞主 UI 线程
-	go func() {
-		// 在后台静静地等待 5 秒
-		time.Sleep(time.Second * 5)
-
-		// 3. 时间到了，把安全修改 UI 的任务“派遣”回主线程执行
-		w.Dispatch(func() {
-			w.Navigate(host + "/index2")
+	chrome.NavigationCompletedCallback = func(sender *edge.ICoreWebView2, args *edge.ICoreWebView2NavigationCompletedEventArgs) {
+		chrome.JSONMessageCallback = edge.WrapJSONCallback(func(data Action) {
+			fmt.Println("message = ", data)
 		})
+	}
+
+	go func() {
+		for i := 0; i < 100; i++ {
+			w.Dispatch(func() {
+				w.Emit("myEvent", i)
+				w.PostWebMessageAsJSON(map[string]int{"num": i})
+			})
+			time.Sleep(time.Second * 1)
+		}
 	}()
+
+	w.AddHtmlContentRoute(host, html)
+
+	w.Navigate(host)
+
 	w.Run()
 }

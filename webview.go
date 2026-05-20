@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"reflect"
-	"strconv"
 	"sync"
 	"unsafe"
 
@@ -137,7 +136,6 @@ func NewWithOptions(opts WebViewOptions) WebView {
 		autofocus: opts.AutoFocus,
 	}
 
-	opts.Chromium.MessageCallback = w.msgcb
 	opts.Chromium.SetPermission(
 		edge.CoreWebView2PermissionKindClipboardRead,
 		edge.CoreWebView2PermissionStateAllow,
@@ -169,6 +167,21 @@ func NewWithOptions(opts WebViewOptions) WebView {
 
 	if w.route {
 		w.browser.AddWebResourceRequestedFilter(w.host+"*", edge.COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW)
+		var env = w.browser.Environment()
+		w.browser.WebResourceRequestedCallback = func(request *edge.ICoreWebView2WebResourceRequest, args *edge.ICoreWebView2WebResourceRequestedEventArgs) {
+			var uri, err = request.GetUri()
+			fmt.Println("uri = ", uri)
+			if err != nil {
+				return
+			}
+			if route, found := w.routes[uri]; found {
+				var res, err = env.CreateWebResourceResponse([]byte(route.content), 200, "OK", route.headers)
+				if err != nil {
+					return
+				}
+				args.PutResponse(res)
+			}
+		}
 	}
 
 	return w
@@ -261,27 +274,25 @@ func (w *webview) createWindow(opts WebViewOptions) bool {
 		return false
 	}
 
-	setWindowContext(w.hwnd, w)
+	go func() {
+		setWindowContext(w.hwnd, w)
 
-	// 窗口置顶
-	if opts.AlwaysOnTop {
-		w32.User32SetWindowPos.Call(
-			w.hwnd, hwndTopmost,
-			0, 0, 0, 0,
-			swpNoMove|swpNoSize|swpNoActivate,
-		)
-	}
+		if opts.AlwaysOnTop {
+			w32.User32SetWindowPos.Call(
+				w.hwnd, hwndTopmost,
+				0, 0, 0, 0,
+				swpNoMove|swpNoSize|swpNoActivate,
+			)
+		}
 
-	// 显示窗口
-	showMode := uintptr(swShow)
-	if opts.StartMaximized {
-		showMode = swMaximize
-	}
-	w32.User32ShowWindow.Call(w.hwnd, showMode)
-	w32.User32UpdateWindow.Call(w.hwnd)
-	w32.User32SetFocus.Call(w.hwnd)
-
-	// 嵌入浏览器
+		showMode := uintptr(swShow)
+		if opts.StartMaximized {
+			showMode = swMaximize
+		}
+		w32.User32ShowWindow.Call(w.hwnd, showMode)
+		w32.User32UpdateWindow.Call(w.hwnd)
+		w32.User32SetFocus.Call(w.hwnd)
+	}()
 	if !w.browser.Embed(w.hwnd) {
 		log.Println("browser.Embed failed")
 		return false
@@ -379,6 +390,32 @@ func (w *webview) SetIcon(id uintptr) {
 	w32.User32SendMessageW.Call(w.hwnd, 0x0080, 1, hIcon)
 }
 
+func (w *webview) PostWebMessageAsJSON(data interface{}) error {
+	var buff, _ = json.Marshal(&data)
+	return w.browser.PostWebMessageAsJson(string(buff))
+}
+
+func (w *webview) PostWebMessageAsString(str string) error {
+	return w.browser.PostWebMessageAsString(str)
+}
+
+func (w *webview) Emit(eventName string, data interface{}) {
+	var buff, _ = json.Marshal(&data)
+	var js = fmt.Sprintf(`window.dispatchEvent(new CustomEvent('%s', { detail: %s }));`,
+		eventName, string(buff))
+
+	w.Eval(js)
+}
+
+func (w *webview) GetURL() string {
+	var html, err = w.browser.GetURL()
+	if err != nil {
+		log.Println("get page source = ", err.Error())
+		return ""
+	}
+	return html
+}
+
 func (w *webview) AddRoute(path string, content string, headers string) {
 	w.routes[path] = route{path: path, content: content, headers: headers}
 }
@@ -425,41 +462,6 @@ type rpcMessage struct {
 func jsString(v interface{}) string {
 	b, _ := json.Marshal(v)
 	return string(b)
-}
-
-func (w *webview) msgcb(msg string) {
-	d := rpcMessage{}
-	if err := json.Unmarshal([]byte(msg), &d); err != nil {
-		log.Printf("invalid RPC message: %v", err)
-		return
-	}
-
-	id := strconv.Itoa(d.ID)
-	res, err := w.callbinding(d)
-	if err != nil {
-		errStr := jsString(err.Error())
-		w.Dispatch(func() {
-			w.Eval("window._rpc[" + id + "].reject(" + errStr + ");" +
-				"window._rpc[" + id + "] = undefined")
-		})
-		return
-	}
-
-	b, err := json.Marshal(res)
-	if err != nil {
-		errStr := jsString(err.Error())
-		w.Dispatch(func() {
-			w.Eval("window._rpc[" + id + "].reject(" + errStr + ");" +
-				"window._rpc[" + id + "] = undefined")
-		})
-		return
-	}
-
-	result := string(b)
-	w.Dispatch(func() {
-		w.Eval("window._rpc[" + id + "].resolve(" + result + ");" +
-			"window._rpc[" + id + "] = undefined")
-	})
 }
 
 func (w *webview) callbinding(d rpcMessage) (interface{}, error) {
@@ -585,23 +587,6 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 // ----------------------------------------------------------------------------
 
 func (w *webview) Run() {
-	if w.route {
-		var env = w.browser.Environment()
-		w.browser.WebResourceRequestedCallback = func(request *edge.ICoreWebView2WebResourceRequest, args *edge.ICoreWebView2WebResourceRequestedEventArgs) {
-			var uri, err = request.GetUri()
-			fmt.Println("uri = ", uri)
-			if err != nil {
-				return
-			}
-			if route, found := w.routes[uri]; found {
-				var res, err = env.CreateWebResourceResponse([]byte(route.content), 200, "OK", route.headers)
-				if err != nil {
-					return
-				}
-				args.PutResponse(res)
-			}
-		}
-	}
 	var msg w32.Msg
 	for {
 		ret, _, _ := w32.User32GetMessageW.Call(
