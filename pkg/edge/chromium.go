@@ -40,6 +40,7 @@ type Chromium struct {
 
 	// Callbacks
 	MessageCallback              func(string)
+	StringMessageCallback        func(string)
 	JSONMessageCallback          func(any)
 	WebResourceRequestedCallback func(request *ICoreWebView2WebResourceRequest, args *ICoreWebView2WebResourceRequestedEventArgs)
 	NavigationCompletedCallback  func(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs)
@@ -297,6 +298,18 @@ func (e *Chromium) MessageReceived(sender *ICoreWebView2, args *iCoreWebView2Web
 		)
 		if message != nil {
 			e.MessageCallback(w32.Utf16PtrToString(message))
+			windows.CoTaskMemFree(unsafe.Pointer(message))
+		}
+	}
+
+	if e.StringMessageCallback != nil {
+		var message *uint16
+		_, _, _ = args.vtbl.TryGetWebMessageAsString.Call(
+			uintptr(unsafe.Pointer(args)),
+			uintptr(unsafe.Pointer(&message)),
+		)
+		if message != nil {
+			e.StringMessageCallback(w32.Utf16PtrToString(message))
 			windows.CoTaskMemFree(unsafe.Pointer(message))
 		}
 	}

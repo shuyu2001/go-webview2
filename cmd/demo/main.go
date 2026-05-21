@@ -39,6 +39,12 @@ func main() {
 	defer w.Destroy()
 
 	chrome.NavigationCompletedCallback = func(sender *edge.ICoreWebView2, args *edge.ICoreWebView2NavigationCompletedEventArgs) {
+		w.Bind("hello", func() {
+			fmt.Println("8888")
+		})
+		chrome.StringMessageCallback = func(s string) {
+			fmt.Println(s)
+		}
 		chrome.JSONMessageCallback = edge.WrapJSONCallback(func(data Action) {
 			fmt.Println("message = ", data)
 		})

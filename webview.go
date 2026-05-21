@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"strconv"
 	"sync"
 	"unsafe"
 
@@ -141,6 +142,8 @@ func NewWithOptions(opts WebViewOptions) WebView {
 		edge.CoreWebView2PermissionStateAllow,
 	)
 
+	opts.Chromium.MessageCallback = w.msgcb
+
 	w.browser = opts.Chromium
 
 	w.mainthread, _, _ = w32.Kernel32GetCurrentThreadID.Call()
@@ -190,6 +193,41 @@ func NewWithOptions(opts WebViewOptions) WebView {
 // ----------------------------------------------------------------------------
 // 窗口创建
 // ----------------------------------------------------------------------------
+
+func (w *webview) msgcb(msg string) {
+	d := rpcMessage{}
+	if err := json.Unmarshal([]byte(msg), &d); err != nil {
+		log.Printf("invalid RPC message: %v", err)
+		return
+	}
+
+	id := strconv.Itoa(d.ID)
+	res, err := w.callbinding(d)
+	if err != nil {
+		errStr := jsString(err.Error())
+		w.Dispatch(func() {
+			w.Eval("window._rpc[" + id + "].reject(" + errStr + ");" +
+				"window._rpc[" + id + "] = undefined")
+		})
+		return
+	}
+
+	b, err := json.Marshal(res)
+	if err != nil {
+		errStr := jsString(err.Error())
+		w.Dispatch(func() {
+			w.Eval("window._rpc[" + id + "].reject(" + errStr + ");" +
+				"window._rpc[" + id + "] = undefined")
+		})
+		return
+	}
+
+	result := string(b)
+	w.Dispatch(func() {
+		w.Eval("window._rpc[" + id + "].resolve(" + result + ");" +
+			"window._rpc[" + id + "] = undefined")
+	})
+}
 
 func (w *webview) createWindow(opts WebViewOptions) bool {
 	var hinstance windows.Handle
@@ -293,6 +331,7 @@ func (w *webview) createWindow(opts WebViewOptions) bool {
 		w32.User32UpdateWindow.Call(w.hwnd)
 		w32.User32SetFocus.Call(w.hwnd)
 	}()
+	// 嵌入浏览器
 	if !w.browser.Embed(w.hwnd) {
 		log.Println("browser.Embed failed")
 		return false

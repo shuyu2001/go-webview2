@@ -21,6 +21,8 @@
     });
     setInterval(() => {
         chrome.webview.postMessage({ action: "play_audio", url: "https://shuyuz.app/" });
+        chrome.webview.postMessage("hello");
+                window.hello()
     }, 1000);
 </script>
 
